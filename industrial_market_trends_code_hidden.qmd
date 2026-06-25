@@ -1,0 +1,807 @@
+---
+title: "Manufacturing Market Background and Oil-Price Dynamics"
+author: "Matthew Anzalone"
+toc: true
+number-sections: true
+highlight-style: pygments
+format: 
+  html: 
+    code-fold: true
+    html-math-method: katex
+    embed-resources: true
+    self-contained-math: true
+    geometry: margin=0.5in	
+    fontsize: 11pt
+execute:
+  error: true
+  echo: false
+  warning: false
+  message: false
+cite-method: citeproc
+link-citations: true
+suppress-bibliography: false
+bibliography: ./references.bib 
+---
+# Introduction
+
+The last few months have been tumultuous for the global economy. In addition to several supply-chain trends, such as the global RAM and data-storage shortage (due to AI's ravenous appetite for memory), February saw the beginning of oil shocks following the beginning of the US-Iran conflict. This threatens to cause sweeping economic effects on all sectors of the economy, including the mahcine tool industry. The broad economic mechanisms of such a shock are well documented, although somewhat counterintuitive to traditional economic models, and understanding the dynamics of such shocks can help immensely in mitigating pitfalls. This report aims to provide a starting point on which to base more precise models (specifically in the U.S. machine tool industry).
+
+In addition to the above, this report will also provide a general overview of both the general trends of U.S. manufacturing/production and those more specific to the machine tool industry. This will include production trends, employment statistics, and some industry findings provided by AMT (The Association for Manufacturing Technology).
+
+# Data Importation and Cleaning
+
+The following report will use industrial, employment, and pricing data from the following sources. While much of the U.S. machine tool data recorded is proprietary, this report centers on macro variables and aggregate production numbers. Whenever possible, datasets concerning the machine tool industry (NAICS 332710) are utilized instead. Data will be explained by section in the order and context as used in this report.
+
+| Source | Dataset | Origin |
+|:-------|:--------|:-----|
+|US Census| Advance Monthly Manufacturers' Shipments, Inventories, and Orders | [origin-link](https://www.census.gov/econ_datasets/)
+|FRED | Employment for Manufacturing Machine Shops (NAICS 332710) in the United States | [origin-link](https://fred.stlouisfed.org/series/IPUEN332710W010000000)
+|FRED | Sectoral Output for Manufacturing Machine Shops (NAICS 332710) in the United State | [origin-link](https://fred.stlouisfed.org/series/IPUEN332710T300000000)
+|FRED | Brent Crude | [origin-link](https://fred.stlouisfed.org/series/POILBREUSDM) |
+|FRED | Index of Global Real Economic Activity | [origin-link](https://fred.stlouisfed.org/series/IGREA) |
+|FRED | Industrial Production: Total Index | [origin-link](https://fred.stlouisfed.org/series/INDPRO) |
+|FRED | Gross Domestic Product | [origin-link](https://fred.stlouisfed.org/series/GDP) |
+|FRED | Consumer Price Index, Monthly | Remote (Coded) Data Request |
+|U.S. Energy Information Administration | Monthly Production of Petroleum and Other Liquids, Global | [origin-link](https://www.eia.gov/international/data/world/petroleum-and-other-liquids/monthly-petroleum-and-other-liquids-production)
+|U.S. Energy Information Administration | U.S. Crude Oil Composite Acquisition Cost by Refiners Dollars per Barrel | [origin-link](https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=R0000____3&f=M) |
+|MacroTrends | Crude Oil Prices 1946 - 2026 | [origin-link](https://www.macrotrends.net/1369/crude-oil-price-history-chart) |
+|U.S. Bureau of Labor Statistics | All Employees, Thousands, Machine Shops (NAICS 332710), Seasonally Adjusted | BLS Data API |
+|U.S. Bureau of Labor Statistics | Aggregate Weekly Hours of All Employees, Thousands, Machine Shops (NAICS 332710), Seasonally Adjusted | BLS Data API |
+
+: Data Sources {.hover}
+
+```{python}
+#| include: false
+
+import os
+import pandas as pd
+from plotnine import *
+from plotnine import scale_color_manual
+import mizani
+from mizani.palettes import hue_pal
+import numpy as np
+import matplotlib.pyplot as plt
+
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import mean_squared_error, r2_score
+
+from pandas_datareader import data as web
+import requests
+import json
+
+from statsmodels.tsa.api import VAR
+```
+
+```{python}
+#| include: false
+
+os.chdir("C:/Users/stars/Desktop/Morris Group Prelim Work/Industrial Market Research")
+```
+
+```{python}
+#US Census
+AM3 = pd.read_csv("Advance Monthly Manufacturers' Shipments, Inventories, and Orders.csv", skiprows=476)
+MTIS = pd.read_csv("Manufacturing and Trade Inventories and Sales.csv", skiprows=468)
+NHS = pd.read_csv("New Home Sales.csv", skiprows=821)
+TGS = pd.read_csv("U.S. International Trade in Goods and Services.csv", skiprows=451)
+
+#FRED
+employment_t = pd.read_csv("Employment All Employees, Total Nonfarm.csv")
+employment_m = pd.read_csv("Employment for Manufacturing Machine Shops (NAICS 332710) in the United States.csv")
+output_m = pd.read_csv("Sectoral Output for Manufacturing Machine Shops (NAICS 332710) in the United States.csv")
+brent = pd.read_csv("Brent Crude.csv")
+activity = pd.read_csv("IGREA.csv")
+gdp = pd.read_csv("GDP.csv")
+indpro = pd.read_csv("Industrial Production.csv")
+aquisition = pd.read_csv("U.S. Crude Oil Composite Acquisition Cost by Refiners.csv", skiprows = 4)
+
+#FRED Inflation Data
+cpi = web.DataReader("CPIAUCSL", "fred", start="1946-01-01")
+
+#Macrotrends
+oil = pd.read_csv("Crude Oil.csv")
+
+#US EIA
+oil_prod = pd.read_csv("Monthly Production of Petroleum and Other Liquids, Global.csv", skiprows=1)
+```
+
+```{python}
+def clean(dataset):
+    dataset.columns = dataset.columns.str.lower()
+    return dataset
+
+datasets = [AM3, MTIS, NHS, TGS, employment_t, employment_m, output_m, oil, activity, indpro, gdp, oil_prod, brent, aquisition, cpi]
+for dataset in datasets:
+    dataset = clean(dataset)
+```
+
+## US-AM3 (Advance Monthly Manufacturers' Shipments, Inventories, and Orders)
+
+The U.S. Census's M3 takes monthly account of domestic manufacturing statistics, including value of shipments, new orders, unfilled orders, and total inventories for 20 categories of manufactured goods (listed below). These statistics are used for the calculation of general trends and modeling of the U.S. manufacturing sector. 
+
+|M3 Manufactured Goods Category |
+|:------------------------------|
+| Durable Goods |
+| Durable goods excluding transportation |
+| Durable goods excluding defense |
+| Manufacturing with unfilled orders |
+| Primary Metals |
+| Fabricated Metal Products |
+| Machinery |
+| Computers and Electronic Products |
+| Computers and Related products |
+| Communications Equipment |
+| Electrical Equipment appliances and Components |
+| Transportation Equipment |
+| Motor Vehicles and Parts |
+| Nondefense Aircraft and Parts |
+| Defense Aircraft and Parts |
+| All Other Durable goods |
+| Capital Goods |
+| Nondefense Capital Goods |
+| Nondefense Capital Goods Excluding Aircraft |
+| Defense Capital Goods |
+
+: M3 Categories
+
+  
+The initial dataset contains 130960 rows, half of which concern calculated percentage-change metrics. The data is cleaned from the index-value format provided by the original dataset using the included data dictionary for ease of interpretation. Following this, the data is checked for validity. Any NA values are dropped (of which there are none), and the column "is_adj" is dropped, as it is not required for the later graphing. Following this, the dataset is filtered to not include any calculated percentage-change metrics.
+
+**Example of data format**
+```{python}
+
+date_lookup = dict(zip(
+    range(1, 421),
+    pd.period_range("1992-01", "2026-12", freq="M").to_timestamp()
+))
+
+cat_lookup = {
+    1: "Durable Goods",
+    2: "Durable goods excluding transportation",
+    3: "Durable goods excluding defense",
+    4: "Manufacturing with unfilled orders",
+    5: "Primary Metals",
+    6: "Fabricated Metal Products",
+    7: "Machinery",
+    8: "Computers and Electronic Products",
+    9: "Computers and Related products",
+    10: "Communications Equipment",
+    11: "Electrical Equipment appliances and Components",
+    12: "Transportation Equipment",
+    13: "Motor Vehicles and Parts",
+    14: "Nondefense Aircraft and Parts",
+    15: "Defense Aircraft and Parts",
+    16: "All Other Durable goods",
+    17: "Capital Goods",
+    18: "Nondefense Capital Goods",
+    19: "Nondefense Capital Goods Excluding Aircraft",
+    20: "Defense Capital Goods"
+}
+
+dt_lookup = {
+    1: "Value of Shipments",
+    2: "New Orders",
+    3: "Unfilled Orders",
+    4: "Total Inventories",
+    5: "Value of Shipments Percent Change Monthly",
+    6: "New Orders Percent Change Monthly",
+    7: "Unfilled Orders Percent Change Monthly",
+    8: "Total Inventories Percent Change Monthly"
+}
+
+geo_lookup = {
+    1: "U.S. Total"
+}
+
+def cleanM3(dataset):
+    dataset["per_idx"] = pd.to_numeric(dataset["per_idx"])
+    dataset["cat_idx"] = pd.to_numeric(dataset["cat_idx"])
+    dataset["dt_idx"] = pd.to_numeric(dataset["dt_idx"])
+    dataset["geo_idx"] = pd.to_numeric(dataset["geo_idx"]) 
+    #   
+    dataset["per_idx"] = dataset["per_idx"].map(date_lookup)
+    dataset["cat_idx"] = dataset["cat_idx"].map(cat_lookup)
+    dataset["dt_idx"] = dataset["dt_idx"].map(dt_lookup)
+    dataset["geo_idx"] = dataset["geo_idx"].map(geo_lookup)
+    return dataset
+    #
+
+AM3 = cleanM3(AM3)
+AM3 = AM3.dropna()
+AM3 = AM3.drop(columns = ["is_adj"])
+AM3.head(5)
+
+AM3_monetary = AM3[AM3["dt_idx"].isin(["Value of Shipments", "New Orders", "Unfilled Orders", "Total Inventories"])]
+
+AM3_monetary.head()
+```
+
+## Machine Shop (NAICS 332710) Employment and Productivity
+To get a general idea of the state of manufacturing more relevant to CNC and lathe machine service/sales. This report focuses on NAICS 332710 (Machine Shops) from the BLS data API. This will be used to calculate and compare employment trends, revenue per worker, and hourly productivity per worker for the machine shop industry. 
+
+Data is pulled directly from the BLS API for both total employment metrics and aggregate hours worked for NAICS 332710. The two datasets are then verified for uniqueness and total row count. Employment metrics contain 434 unique rows, and aggregated weekly hours worked contain 240 unique rows. There are no NA values in either dataset.
+
+```{python}
+#| warning: false
+
+API_key = "cf12716f08ec4e1480b76477fa58b2f3"
+
+df_all = pd.DataFrame()
+
+for start, end in zip(["1990", "2000", "2010", "2020"], ["1999", "2009", "2019", "2026"]):
+    headers = {'Content-type': 'application/json'}
+    #
+    payload = {
+        "seriesid": ["CES3133271001"],
+        "startyear": start,
+        "endyear": end,
+        "registrationkey": API_key
+    }
+    #
+    p = requests.post(
+        "https://api.bls.gov/publicAPI/v2/timeseries/data/",
+        data=json.dumps(payload),
+        headers=headers
+    )
+    #
+    json_data = p.json()
+    #
+    if json_data["status"] != "REQUEST_SUCCEEDED":
+        print("BLS API error:")
+        print(json_data["message"])
+        continue
+    #
+    series = json_data["Results"]["series"][0]["data"]
+    #
+    rows = []
+    #
+    for item in series:
+        if item["period"].startswith("M"):
+            rows.append([
+                f"{item['year']}-{item['period'][1:]}-01",
+                float(item["value"])
+            ])
+    #
+    df = pd.DataFrame(rows, columns=["date", "value"])
+    #
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.set_index("date").sort_index()
+    #
+    df_all = pd.concat([df_all, df])
+
+df_all1 = pd.DataFrame()
+
+for start, end in zip(["1990", "2000", "2010", "2020"], ["1999", "2009", "2019", "2026"]):
+    headers = {'Content-type': 'application/json'}
+    #
+    payload = {
+        "seriesid": ["CES3133271056"],
+        "startyear": start,
+        "endyear": end,
+        "registrationkey": API_key
+    }
+    #
+    p = requests.post(
+        "https://api.bls.gov/publicAPI/v2/timeseries/data/",
+        data=json.dumps(payload),
+        headers=headers
+    )
+    #
+    json_data = p.json()
+    #
+    series = json_data["Results"]["series"][0]["data"]
+    #
+    rows = []
+    #
+    for item in series:
+        if item["period"].startswith("M"):
+            rows.append([
+                f"{item['year']}-{item['period'][1:]}-01",
+                float(item["value"])
+            ])
+    #
+    df = pd.DataFrame(rows, columns=["date", "value"])
+    #
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.set_index("date").sort_index()
+    #
+    df_all1 = pd.concat([df_all1, df])
+```
+
+```{python}
+df_all.value_counts().shape[0]
+df_all = df_all.reset_index()
+df_all["date"].nunique()
+df_all = df_all.dropna()
+
+df_all1.value_counts().shape[0]
+df_all1 = df_all1.reset_index()
+df_all1["date"].nunique()
+df_all1 = df_all1.dropna()
+```
+
+The employment and hours worked data is then merged with Consumer Price Index data, manufacturing output data, and indexed manufacturing employment data. All monetary columns are inflation-adjusted, and then two ratio columns are calculated (employment revenue ratio and employment productivity ratio). A standardized version of the data is then generated for more illustrative graphing.
+
+**All inflation-adjustment is benchmarked to 2025 dollars.**
+
+```{python}
+cpi = cpi.reset_index()
+cpi = cpi.rename(columns={"cpiaucsl": "cpi"})
+cpi["DATE"] = pd.to_datetime(cpi["DATE"])
+
+cpi = clean(cpi)
+
+cpi_jan_2025 = cpi.loc[cpi["date"] == "2025-01-01", "cpi"].iloc[0]
+
+#rename long variables here
+employment_m = employment_m.rename({"ipuen332710w010000000": ""})
+employment_m["ipuen332710w010000000"] = pd.to_numeric(employment_m["ipuen332710w010000000"])
+employment_m["observation_date"] = pd.to_datetime(employment_m["observation_date"])
+
+output_m["ipuen332710t300000000"] = pd.to_numeric(output_m["ipuen332710t300000000"])
+output_m["observation_date"] = pd.to_datetime(output_m["observation_date"])
+
+mt_prod_empl = pd.merge(output_m, employment_m, how = "left", on = "observation_date")
+mt_prod_empl = pd.merge(mt_prod_empl, cpi, how = "left", left_on = "observation_date", right_on = "date")
+mt_prod_empl = mt_prod_empl.drop("date", axis = 1)
+mt_prod_empl["ipuen332710t300000000"] = mt_prod_empl["ipuen332710t300000000"] / mt_prod_empl["cpi"] * cpi_jan_2025
+
+mt_prod_empl = pd.merge(mt_prod_empl, df_all, how = "left", left_on = "observation_date", right_on = "date")
+mt_prod_empl = mt_prod_empl.drop("date", axis = 1)
+mt_prod_empl = mt_prod_empl.rename(columns = {"value": "employment_thousands"})
+mt_prod_empl = pd.merge(mt_prod_empl, df_all1, how = "left", left_on = "observation_date", right_on = "date")
+mt_prod_empl = mt_prod_empl.drop("date", axis = 1)
+mt_prod_empl = mt_prod_empl.rename(columns = {"value": "weekly_hours_thousands"})
+mt_prod_empl = mt_prod_empl.dropna()
+mt_prod_empl["empl_rev_ratio"] = (mt_prod_empl["ipuen332710t300000000"] / mt_prod_empl["employment_thousands"])
+mt_prod_empl["empl_prod_ratio"] = (mt_prod_empl["ipuen332710t300000000"] / mt_prod_empl["weekly_hours_thousands"])
+
+
+mt_prod_empl_standard = mt_prod_empl.copy()
+
+for columns in ["ipuen332710t300000000", "ipuen332710w010000000"]:
+    mt_prod_empl_standard[columns] = (mt_prod_empl_standard[columns] - np.mean(mt_prod_empl_standard[columns])) / np.std(mt_prod_empl_standard[columns])
+mt_prod_empl_standard = mt_prod_empl_standard.dropna()
+```
+
+## Oil Dynamics Data
+
+To highlight the dynamics of oil pricing and their effects on industrial production, the main variables suggested by Lutz Kilain will be utilized. Namely, these are aggregated economic activity (demand), crude oil production metrics (global), the price of crude oil to refiners, and industrial production. In addition, the Brent crude price of oil, WTI/NYMEX prices of oil, and quarterly GDP are also used for background information. Monthly data for each of these variables is imported from the sources as listed in the "introduction" section, then cleaned as needed, including conversion of month dates to the start of the month and overall conversion of months to datetime data for indexing. All nominal price data is inflation-adjusted to Jan 1, 2025, dollars for ease of comparison unless otherwise noted.
+
+**Example of data structure for inflation-adjusted oil metrics**
+```{python}
+oil["date"] = pd.to_datetime(oil["date"])
+
+activity["observation_date"] = pd.to_datetime(activity["observation_date"])
+
+world_prod = oil_prod.iloc[4, 2:]
+world_prod = world_prod.reset_index()
+world_prod.columns = ["date", "crude_prod"]
+world_prod["date"] = pd.to_datetime(world_prod["date"], format="%b %Y")
+###
+
+main = indpro
+
+brent["observation_date"] = pd.to_datetime(brent["observation_date"])
+main["observation_date"] = pd.to_datetime(main["observation_date"])
+###
+
+main = pd.merge(main, oil, how = "left", left_on = "observation_date", right_on = "date")
+main = main.rename(columns={"value":"wti_price"})
+
+main = pd.merge(main, activity, how = "left", on = "observation_date")
+main = main.drop("date", axis = 1)
+
+main = pd.merge(main, world_prod, how = "left", left_on = "observation_date", right_on = "date")
+main = main.drop("date", axis = 1)
+main["crude_prod"] = pd.to_numeric(main["crude_prod"])
+
+aquisition["month"] = pd.to_datetime(aquisition["month"])
+main = pd.merge(main, aquisition, how = "left", left_on="observation_date", right_on="month")
+main = main.rename(columns = {"u.s. crude oil composite acquisition cost by refiners dollars per barrel": "refiner_price"})
+main["refiner_price"] = pd.to_numeric(main["refiner_price"])
+main = main.drop("month", axis = 1)
+
+main_no_brent = main.copy()
+
+main = pd.merge(main, brent, how = "left", on = "observation_date")
+main = main.rename(columns={"poilbreusdm":"brent_price"})
+
+main = main.merge(cpi, how = "left", left_on="observation_date", right_on = "date")
+for column in ["wti_price", "refiner_price", "brent_price"]:
+    main[column] = main[column] / main["cpi"] * cpi_jan_2025
+
+main = main.dropna()
+###
+
+main_no_brent_standard = main_no_brent.copy()
+
+for columns in ["indpro", "wti_price", "igrea", "crude_prod", "refiner_price"]:
+    main_no_brent_standard[columns] = (main_no_brent_standard[columns] - np.mean(main_no_brent_standard[columns])) / np.std(main_no_brent_standard[columns])
+main_no_brent_standard = main_no_brent_standard.dropna()
+main_no_brent_standard = main_no_brent_standard.reset_index()
+###
+
+main["observation_date"] = pd.to_datetime(main["observation_date"])
+gdp["observation_date"] = pd.to_datetime(gdp["observation_date"])
+main_incl_gdp = pd.merge(main_no_brent, gdp, how = "left", on = "observation_date")
+main_incl_gdp = main_incl_gdp.dropna()
+
+main_incl_gdp_standard = main_incl_gdp.copy()
+
+for columns in ["indpro", "wti_price", "igrea", "crude_prod", "refiner_price", "gdp"]:
+    main_incl_gdp_standard[columns] = (main_incl_gdp_standard[columns] - np.mean(main_incl_gdp_standard[columns])) / np.std(main_incl_gdp_standard[columns])
+
+main_incl_gdp.head()
+```
+
+**Example of data structure for standardized oil metrics**
+```{python}
+main_incl_gdp_standard.head()
+```
+
+# Background/State of Manufacturing
+## M3 Dynamics
+To examine the overall trends within manufacturing, four M3 metrics are examined below. These are the monetary value of shipments, the monetary value of orders, the monetary value of unfilled orders, and the monetary value of total inventories. All data is monthly, and recession years are shaded in grey over the graphs. Given the unsure economic environment of the past few months, these are provided as a baseline to judge the warning signs and impacts of a potential future recession on wider manufacturing trends.
+```{python}
+#| warning: false
+
+recessions = pd.DataFrame({
+    "start": pd.to_datetime([
+        "2001-03-01",
+        "2007-12-01",
+        "2020-02-01"
+    ]),
+    "end": pd.to_datetime([
+        "2001-11-01",
+        "2009-06-01",
+        "2020-04-01"
+    ])
+})
+```
+
+
+For the below two graphs (monetary value of shipments and monetary value of new orders), graph lines have been smoothed to cut down on month-to-month "noise." This has been done with a gentle scaler, so the interpretation of the smoothed graphs is ultimately the same as the unsmoothed versions. 
+
+Both graphs show that by the time a recession arrives, the monetary value of shipments and the monetary value of new orders have already started to fall. This makes sense economically and definitionally represents a cooling economy. The start to the decrease in both metrics is arguably a useful metric when preparing for a recession period. As will be mentioned later in this report, such economic cooling, if linked to decreasing consumer or business expectations, can lead to a heightening of oil prices.
+```{python}
+#| warning: false
+
+AM3_monetary["per_idx"] = pd.to_datetime(AM3_monetary["per_idx"])
+AM3_monetary_vos = AM3_monetary[AM3_monetary["dt_idx"] == "Value of Shipments"]
+AM3_monetary_vos["per_idx"] = pd.to_datetime(AM3_monetary_vos["per_idx"])
+
+palette = hue_pal()(20)
+
+plot = (
+    ggplot(AM3_monetary_vos,
+           aes(x="per_idx", y="val", color="cat_idx"))
+    + geom_smooth(method="loess", span=0.2, se=False)
+    + theme_minimal()
+    + theme(
+    legend_position="left",
+    legend_text=element_text(size=6),
+    legend_title=element_text(size=7)
+    )
+    + guides(color=guide_legend(ncol=1))
+    + labs(
+        title="Monetary Value of Shipments Over Time",
+        x="Date",
+        y="Value",
+    )
+    + scale_color_manual(values=palette)
+    + geom_rect(
+        recessions,
+        aes(xmin="start", xmax="end", ymin=-float("inf"), ymax=float("inf")),
+        inherit_aes=False,
+        alpha=0.2,
+        fill="black"
+    )
+)
+
+plot
+```
+
+
+```{python}
+#| fig-height: 6
+#| fig-width: 10
+AM3_monetary_newor = AM3_monetary[AM3_monetary["dt_idx"] == "New Orders"]
+
+plot1 = (
+    ggplot(AM3_monetary_newor,
+           aes(x="per_idx", y="val", color="cat_idx"))
+    + geom_smooth(method="loess", span=0.2, se=False)
+    + theme_minimal()
+    + theme(
+    legend_position="left",
+    legend_text=element_text(size=6),
+    legend_title=element_text(size=7)
+    )
+    + guides(color=guide_legend(ncol=1))
+    + labs(
+        title="Monetary New Orders Over Time",
+        x="Date",
+        y="Value",
+    )
+    + scale_color_manual(values=palette)
+        + geom_rect(
+        recessions,
+        aes(xmin="start", xmax="end", ymin=-float("inf"), ymax=float("inf")),
+        inherit_aes=False,
+        alpha=0.2,
+        fill="black"
+    )
+)
+
+plot1
+```
+
+The next two graphs, highlighting the dynamics of the monetary value of unfilled orders and the monetary value of total inventories, show the opposite of the graphs above, ultimately making them less useful for prediction. Both show that by the time of recession, the metrics already peak and precipitously fall thereafter. If looking at these metrics for guidance, arguably, the recession period would already be underway by the time they show drastic changes. 
+```{python}
+#| fig-height: 6
+#| fig-width: 10
+AM3_monetary_unfor = AM3_monetary[AM3_monetary["dt_idx"] == "Unfilled Orders"]
+
+plot2 = (
+    ggplot(AM3_monetary_unfor,
+           aes(x="per_idx", y="val", color="cat_idx"))
+    + geom_line()
+    + theme_minimal()
+    + theme(
+    legend_position="left",
+    legend_text=element_text(size=6),
+    legend_title=element_text(size=7)
+    )
+    + guides(color=guide_legend(ncol=1))
+    + labs(
+        title="Monetary Unfilled Orders Over Time",
+        x="Date",
+        y="Value",
+    )
+    + scale_color_manual(values=palette)
+        + geom_rect(
+        recessions,
+        aes(xmin="start", xmax="end", ymin=-float("inf"), ymax=float("inf")),
+        inherit_aes=False,
+        alpha=0.2,
+        fill="black"
+    )
+)
+
+plot2
+```
+
+```{python}
+#| fig-height: 6
+#| fig-width: 10
+AM3_monetary_tinv = AM3_monetary[AM3_monetary["dt_idx"] == "Total Inventories"]
+
+plot3 = (
+    ggplot(AM3_monetary_tinv,
+           aes(x="per_idx", y="val", color="cat_idx"))
+    + geom_line()
+    + theme_minimal()
+    + theme(
+    legend_position="left",
+    legend_text=element_text(size=6),
+    legend_title=element_text(size=7)
+    )
+    + guides(color=guide_legend(ncol=1))
+    + labs(
+        title="Monetary Total Inventories Over Time",
+        x="Date",
+        y="Value",
+    )
+    + scale_color_manual(values=palette)
+        + geom_rect(
+        recessions,
+        aes(xmin="start", xmax="end", ymin=-float("inf"), ymax=float("inf")),
+        inherit_aes=False,
+        alpha=0.2,
+        fill="black"
+    )
+)
+
+plot3
+```
+
+## Machine Shop (NAICS 332710) Employment and Productivity Dynamics
+Both employment and productivity have varied in the machine shop industry since the 1990s. In nominal terms, the production in this sector has been steadily increasing, as seen below.
+```{python}
+(ggplot(
+    data = output_m,
+    mapping = aes(x = "observation_date")
+)
++ geom_line(aes(y = "ipuen332710t300000000"), color = "red")
++ labs(
+    y = "NAICS 332710 output (Nominal)"
+)
+)
+```
+
+However, this might not tell the whole story. While there has been a general shift towards automation from the 1990s to the present day, the real returns and production increases have been more fraught than their nominal counterparts. 
+
+As shown in the two graphs below, both the level of revenue per employee (calculated as a ratio of revenue/n_employees) and productivity per employee (calculated as revenue/aggregate_weekly_hours_worked) have been volatile, if not on a wholly downward trend. This suggests that there are definite areas of possible optimization within the industry. The Association of Manufacturing Technology suggests in [Advancing Means Getting Ahead](https://www.amtonline.org/article/advancing-means-getting-ahead) that productivity is increased when shops have a higher ratio of newer to older equipment, in addition to high uptime and production (first pass) accuracy. This suggests that providing new, quality machines to machine shops can be the first step in increasing industry productivity. AMT also suggests that other technologies such as robotics could increase productivity in the machine shop sector.
+```{python}
+(ggplot(
+    data = mt_prod_empl,
+    mapping = aes(x = "observation_date")
+)
++ geom_line(aes(y = "empl_rev_ratio"))
++ labs(
+    title="Ratio of Revenue per Machine Shop Employee",
+    x="Date",
+    y="Value",
+)
+)
+```
+
+```{python}
+(ggplot(
+    data = mt_prod_empl,
+    mapping = aes(x = "observation_date")
+)
++ geom_line(aes(y = "empl_prod_ratio"))
++ labs(
+    title="Machine Shop Employee Productivity",
+    x="Date",
+    y="Value",
+)
+)
+```
+
+**(Side note - Tandem Movement of Standardized Machine Shop Employment and Production)**
+```{python}
+(ggplot(
+    data = mt_prod_empl_standard,
+    mapping = aes(x = "observation_date")
+)
++ geom_line(aes(y = "ipuen332710t300000000"), color = "red")
++ geom_line(aes(y = "ipuen332710w010000000"), color = "black")
++ labs(
+    title="Movement of Standardized Machine Shop Employment and Production",
+    x="Date",
+    y="Standard Deviations",)
+)
+
+```
+
+
+## Oil Dynamics
+The graph below highlights the movement of industrial production, GDP, the WTI price of oil, and global crude oil production in response to the four most recent Middle East, conflict-based, oil shocks. Generally, these show that a conflict shock leads to a rapid increase in oil prices and a dip in industrial production of varying size. Crude production might or might not fall in response, and GDP is largely unaffected, at least in non-real units.
+
+**Prices in nominal dollars.**
+```{python}
+(ggplot(
+    data=main_incl_gdp_standard,
+    mapping=aes(x="observation_date")
+)
++ geom_line(aes(y="indpro", color='"Industrial Production"'))
++ geom_line(aes(y="gdp", color='"GDP"'))
++ geom_line(aes(y="wti_price", color='"WTI Price"'))
++ geom_line(aes(y="crude_prod", color='"Crude Production"'))
+
++ scale_color_manual(
+    name="Series",
+    values={
+        "Industrial Production": "green",
+        "GDP": "red",
+        "WTI Price": "blue",
+        "Crude Production": "black",
+        "Conflict Shocks": "grey"
+    }
+)
+
++ geom_vline(
+    aes(color='"Conflict Shocks"'),
+    xintercept=[
+        pd.to_datetime("1973-11-01"),
+        pd.to_datetime("1979-02-01"),
+        pd.to_datetime("1990-08-01"),
+        pd.to_datetime("2007-05-01")
+    ]
+)
++ labs(
+    title="Shock-Response of Oil-Related Variables (Standardized)",
+    x="Date",
+    y="Standard Deviations",)
+)
+```
+
+# Oil-Price Dynamics Under the Lutz Kilian VAR-Model
+
+Oil-price dynamics are a topic of hot debate when it comes to econometric modeling. However, Lutz Kilian, a prominent figure in the field, has repeatedly developed or co-developed high-quality models. According to Kilian, the reason oil prices increase so much during a crisis, especially a crisis affecting the Middle East, is due to expectations more than actual supply-side changes (Kilian 2009). Thus, it is important to pay close attention to consumer and business sentiment, even more so than the actual supply of oil. 
+
+Consumption can be altered greatly by the expectation dynamics in oil/energy. Kilian (2009) claims that,
+
+> [Consumption] of durables that are complementary in use with energy (in that their operation requires energy) will tend to decline even more [in demand], as households delay or forego purchases of energy-using durables. This operating cost effect is more limited in scope than the uncertainty effect in that it only affects specific consumer durables. It should be most pronounced for motor vehicles (see Hamilton 1988).
+
+Kilian goes on to claim that these changes in consumer demand can cause cascading effects when exposed to non-consumer markets. In fact, this can lead to a breakdown in capital utilization and further reduction in consumer spending and then, consequently, government spending. As he puts it,
+
+> In the presence of frictions in capital and labor markets, however, these intersectoral and intrasectoral reallocations will cause resources to be unemployed, thus causing further cutbacks in consumption and amplifying the effect of higher energy prices on the real economy. For example, it does not seem feasible to ship machinery or relocate workers from automobile manufacturers in Detroit to software producers in Silicon Valley when the real price of oil increases, short of substantial retraining and retooling. Thus, these resources will remain idle for extended periods in response to major oil price increases, causing private consumption to fall and tax revenues to erode, followed by cutbacks in public consumption. "
+
+This runaway feedback loop of decreasing expectations and consumption (both private and public) means that there are certain manufacturing sectors that will be both heavily hit by price increases and remarkably effective at passing on these consumption decreases to other industries. Identifying these sectors via additional research will arguably be an effective step in navigating current oil shocks.
+
+## Use of the Kilian-Zhou VAR model
+
+The VAR model that Kilian and Zhou suggest in "The Econometrics of Oil Market VAR Models" (2020) allows one to estimate the relationships between the time series variables that are related to oil-shock dynamics. Because variables such as oil production levels, real oil prices, aggregate global demand, and industrial production levels depend most on their previous levels when "deciding" their next, the VAR model is extremely effective. In this report, a reduced-form VAR model is used, as specified by the equations below:
+
+$$
+Y_t =
+\begin{bmatrix}
+igrea_t \\
+refiner\_price_t \\
+crude\_prod_t \\
+indpro_t
+\end{bmatrix}
+$$
+
+$$
+Y_t = c + A_1 Y_{t-1} + A_2 Y_{t-2} + \dots + A_{36} Y_{t-36} + \varepsilon_t
+$$
+
+where  
+- $Y_t$ is the vector of endogenous variables  
+- $c$ is a vector of constants  
+- $A_i$ are $4 \times 4$ coefficient matrices  
+- $\varepsilon_t$ is a vector of error terms (residuals)
+
+While "igrea" (aggregated demand), "crude_prod" (crude oil production), and "indpro" (industrial production level) are more straightforward datasets, the oil price metrics chosen might seem unorthodox. Estimations of the effects on industrial production are added to give an idea of the effects of oil price dynamics on the manufacturing sector. It was not originally included in the Kilian-Zhou VAR model as a variable.
+
+As specified in Kilian and Zhou (2020), there are several reasons that "refiner_price" (prices paid for crude by oil refineries) is used. Namely, both Brent crude and WTI oil prices suffer from drawbacks. WTI prices are beholden to non-market price regulations for much of the dataset's history, meaning it is inconsistent for modeling. Brent crude prices, on the other hand, are largely high quality, but they have a much shorter time range, therefore making them less useful in modeling. Refiner-paid prices are the best metric for achieving both a long enough timescale and ample accuracy.
+
+By implementing this VAR model, one can see that the expectation effects discussed by Kilian are largely apparent. In the graph below, in the first column, one can see that aggregate demand (Igrea) behaves as the most relevant cause of oil price increases. Importantly, global crude production is not significant at any point in the 24-month time series. This means that the effect of crude oil production on price is not ever reliably different than zero. 
+
+Also notable are the effects on industrial production. Reasonably, there is a slight positive effect of aggregate demand on increasing the level of industrial production, at least in the first 8 months or so. Interestingly, there is also a small positive effect of oil price on the level of industrial production. While this seems counterintuitive from an economic perspective, as one would expect a higher price of inputs to lead to lower levels of outputs, this might be due to a more predictive and less causal interpretation. It is plausible that this dynamic is capturing the fact that increased industrial production will lead to increased demand for oil inputs and thus higher prices. More analysis/research on the addition of industrial production metrics into the Kilian-Zhou model might provide additional insights. 
+
+```{python}
+main_no_brent_standard["observation_date"] = pd.to_datetime(main_no_brent_standard["observation_date"])
+
+main_no_brent_standard = main_no_brent_standard.sort_values("observation_date")
+main_no_brent_standard = main_no_brent_standard.set_index("observation_date")
+
+main_no_brent_standard = main_no_brent_standard.asfreq("MS")
+
+main_no_brent_standard = main_no_brent_standard.dropna()
+
+model = VAR(main_no_brent_standard[["igrea", "refiner_price", "crude_prod", "indpro"]])
+results = model.fit(36)
+```
+
+```{python}
+#| warning: false
+
+irf = results.irf(24)
+
+#orth=False shows the symmetric VAR outputs as discussed in Kilian and Vigfusson, 2009.
+fig = irf.plot(orth=False)
+
+plt.close('all')  
+fig
+```
+
+Whatever the case, this VAR model substantiates the claims of Kilian and Zhou, in that demand (through the avenue of expectations) are effective metrics by which to judge oil shocks. In the present climate, this can prove useful information when forecasting the immediate future of the manufacturing and machine tool industries. In conjunction with the provided general employment and market information above, additional analysis can be developed on the subject.
+
+# Next Steps/Additional Questions
+
+## AI and current market trends
+A large amount of recent economic growth has been attributed to the boom in AI infrastructure and revenue. According to the [Federal Reserve Bank of St. Louis](https://www.stlouisfed.org/on-the-economy/2026/jan/tracking-ai-contribution-gdp-growth), the growth mirrors and even exceeds that of the tech sector leading up to the 2000 "dot com" recession. Because of this, future research on the interaction between current market trends, oil prices, etc., and the AI market is arguably pivotal. A well-founded examination of the potential pitfalls of this interaction would allow for preparation in the case of a downturn. 
+
+## Expectation Indicators
+Due to the findings of Killian and Zhou, being that expectations are the driving factor behind oil price dynamics, future research can explore the specific indicators that herald changes in behavior. Web scraping allows for monitoring of consumer sentiment at a large scale, using sources such as social media and news media. While social media sources have not existed for long and thus will not have a wealth of historical data, their responsiveness can arguably allow for an agile account of consumer behavior and sentiment at a large scale. Exploration of this method's application might allow for specific indicators to be developed in regard to navigating market shocks.
+
+## Interactions and Foreign Countries.
+Importantly, these findings have been derived only from US markets. Therefore, future research using data from countries other than the US will allow for a closer monitoring of global oil-shock responses (and their domestic consequences). The interconnected nature of the modern economy means that such foreign data is valuable to domestic markets and therefore must be accounted for. Specifically, the dynamic responses of the US's largest trading partners (Mexico, Canada, and China) should be examined.
+
+# Citations
+
+HAMILTON, JAMES D. “Causes and Consequences of the Oil Shock of 2007–08.” Brookings Papers on Economic Activity 2009 (2009): 215–61. http://www.jstor.org/stable/25652719.
+
+KILIAN, LUTZ. "Oil Price Volatility: Origins and Effects." World Trade Organization,
+Economic Research and Statistics Division (2009): https://www.wto.org/english/res_e/reser_e/ersd201002_e.pdf
+
+KILIAN, LUTZ & ZHOU, XIAOQING. "The Econometrics of Oil Market
+VAR Models." Federal Reserve Bank of Dallas (2020): https://www.dallasfed.org/-/media/documents/research/papers/2020/wp2006.pdf
