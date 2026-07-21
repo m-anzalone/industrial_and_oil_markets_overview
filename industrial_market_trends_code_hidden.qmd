@@ -20,11 +20,10 @@ execute:
 cite-method: citeproc
 link-citations: true
 suppress-bibliography: false
-bibliography: ./references.bib 
 ---
 # Introduction
 
-The last few months have been tumultuous for the global economy. In addition to several supply-chain trends, such as the global RAM and data-storage shortage (due to AI's ravenous appetite for memory), February saw the beginning of oil shocks following the beginning of the US-Iran conflict. This threatens to cause sweeping economic effects on all sectors of the economy, including the mahcine tool industry. The broad economic mechanisms of such a shock are well documented, although somewhat counterintuitive to traditional economic models, and understanding the dynamics of such shocks can help immensely in mitigating pitfalls. This report aims to provide a starting point on which to base more precise models (specifically in the U.S. machine tool industry).
+The last few months have been tumultuous for the global economy. In addition to several supply-chain trends, such as the global RAM and data-storage shortage (due to AI's ravenous appetite for memory), February saw the beginning of oil shocks following the beginning of the US-Iran conflict. This threatens to cause sweeping economic effects on all sectors of the economy, including the machine tool industry. The broad economic mechanisms of such a shock are well documented, although somewhat counterintuitive to traditional economic models, and understanding the dynamics of such shocks can help immensely in mitigating pitfalls. This report aims to provide a starting point on which to base more precise models (specifically in the U.S. machine tool industry).
 
 In addition to the above, this report will also provide a general overview of both the general trends of U.S. manufacturing/production and those more specific to the machine tool industry. This will include production trends, employment statistics, and some industry findings provided by AMT (The Association for Manufacturing Technology).
 
@@ -36,7 +35,7 @@ The following report will use industrial, employment, and pricing data from the 
 |:-------|:--------|:-----|
 |US Census| Advance Monthly Manufacturers' Shipments, Inventories, and Orders | [origin-link](https://www.census.gov/econ_datasets/)
 |FRED | Employment for Manufacturing Machine Shops (NAICS 332710) in the United States | [origin-link](https://fred.stlouisfed.org/series/IPUEN332710W010000000)
-|FRED | Sectoral Output for Manufacturing Machine Shops (NAICS 332710) in the United State | [origin-link](https://fred.stlouisfed.org/series/IPUEN332710T300000000)
+|FRED | Sectoral Output for Manufacturing Machine Shops (NAICS 332710) in the United States | [origin-link](https://fred.stlouisfed.org/series/IPUEN332710T300000000)
 |FRED | Brent Crude | [origin-link](https://fred.stlouisfed.org/series/POILBREUSDM) |
 |FRED | Index of Global Real Economic Activity | [origin-link](https://fred.stlouisfed.org/series/IGREA) |
 |FRED | Industrial Production: Total Index | [origin-link](https://fred.stlouisfed.org/series/INDPRO) |
@@ -124,16 +123,16 @@ The U.S. Census's M3 takes monthly account of domestic manufacturing statistics,
 |M3 Manufactured Goods Category |
 |:------------------------------|
 | Durable Goods |
-| Durable goods excluding transportation |
-| Durable goods excluding defense |
-| Manufacturing with unfilled orders |
+| Durable Goods Excluding Transportation |
+| Durable Goods Excluding Defense |
+| Manufacturing with Unfilled Orders |
 | Primary Metals |
 | Fabricated Metal Products |
 | Machinery |
 | Computers and Electronic Products |
-| Computers and Related products |
+| Computers and Related Products |
 | Communications Equipment |
-| Electrical Equipment appliances and Components |
+| Electrical Equipment, Appliances and Components |
 | Transportation Equipment |
 | Motor Vehicles and Parts |
 | Nondefense Aircraft and Parts |
@@ -368,7 +367,7 @@ mt_prod_empl_standard = mt_prod_empl_standard.dropna()
 
 ## Oil Dynamics Data
 
-To highlight the dynamics of oil pricing and their effects on industrial production, the main variables suggested by Lutz Kilain will be utilized. Namely, these are aggregated economic activity (demand), crude oil production metrics (global), the price of crude oil to refiners, and industrial production. In addition, the Brent crude price of oil, WTI/NYMEX prices of oil, and quarterly GDP are also used for background information. Monthly data for each of these variables is imported from the sources as listed in the "introduction" section, then cleaned as needed, including conversion of month dates to the start of the month and overall conversion of months to datetime data for indexing. All nominal price data is inflation-adjusted to Jan 1, 2025, dollars for ease of comparison unless otherwise noted.
+To highlight the dynamics of oil pricing and their effects on industrial production, the main variables suggested by Lutz Kilian will be utilized. Namely, these are aggregated economic activity (demand), crude oil production metrics (global), the price of crude oil to refiners, and industrial production. In addition, the Brent crude price of oil, WTI/NYMEX prices of oil, and quarterly GDP are also used for background information. Monthly data for each of these variables is imported from the sources as listed in the "introduction" section, then cleaned as needed, including conversion of month dates to the start of the month and overall conversion of months to datetime data for indexing. All nominal price data is inflation-adjusted to Jan 1, 2025, dollars for ease of comparison unless otherwise noted.
 
 **Example of data structure for inflation-adjusted oil metrics**
 ```{python}
@@ -465,7 +464,7 @@ recessions = pd.DataFrame({
 
 For the below two graphs (monetary value of shipments and monetary value of new orders), graph lines have been smoothed to cut down on month-to-month "noise." This has been done with a gentle scaler, so the interpretation of the smoothed graphs is ultimately the same as the unsmoothed versions. 
 
-Both graphs show that by the time a recession arrives, the monetary value of shipments and the monetary value of new orders have already started to fall. This makes sense economically and definitionally represents a cooling economy. The start to the decrease in both metrics is arguably a useful metric when preparing for a recession period. As will be mentioned later in this report, such economic cooling, if linked to decreasing consumer or business expectations, can lead to a heightening of oil prices.
+Both graphs show that by the time a recession arrives, the monetary value of shipments and the monetary value of new orders have already started to fall. This makes sense economically, and definitionally represents a cooling economy. The start to the decrease in both metrics is arguably a useful metric when preparing for a recession period. As will be mentioned later in this report, such economic cooling, if linked to decreasing consumer or business expectations, can lead to a heightening of oil prices.
 ```{python}
 #| warning: false
 
@@ -711,7 +710,7 @@ The graph below highlights the movement of industrial production, GDP, the WTI p
 )
 ```
 
-# Oil-Price Dynamics Under the Lutz Kilian VAR-Model
+# Oil-Price Dynamics Under the Lutz Kilian VAR Model
 
 Oil-price dynamics are a topic of hot debate when it comes to econometric modeling. However, Lutz Kilian, a prominent figure in the field, has repeatedly developed or co-developed high-quality models. According to Kilian, the reason oil prices increase so much during a crisis, especially a crisis affecting the Middle East, is due to expectations more than actual supply-side changes (Kilian 2009). Thus, it is important to pay close attention to consumer and business sentiment, even more so than the actual supply of oil. 
 
@@ -725,7 +724,7 @@ Kilian goes on to claim that these changes in consumer demand can cause cascadin
 
 This runaway feedback loop of decreasing expectations and consumption (both private and public) means that there are certain manufacturing sectors that will be both heavily hit by price increases and remarkably effective at passing on these consumption decreases to other industries. Identifying these sectors via additional research will arguably be an effective step in navigating current oil shocks.
 
-## Use of the Kilian-Zhou VAR model
+## Use of the Kilian-Zhou VAR Model
 
 The VAR model that Kilian and Zhou suggest in "The Econometrics of Oil Market VAR Models" (2020) allows one to estimate the relationships between the time series variables that are related to oil-shock dynamics. Because variables such as oil production levels, real oil prices, aggregate global demand, and industrial production levels depend most on their previous levels when "deciding" their next, the VAR model is extremely effective. In this report, a reduced-form VAR model is used, as specified by the equations below:
 
@@ -791,7 +790,7 @@ Whatever the case, this VAR model substantiates the claims of Kilian and Zhou, i
 A large amount of recent economic growth has been attributed to the boom in AI infrastructure and revenue. According to the [Federal Reserve Bank of St. Louis](https://www.stlouisfed.org/on-the-economy/2026/jan/tracking-ai-contribution-gdp-growth), the growth mirrors and even exceeds that of the tech sector leading up to the 2000 "dot com" recession. Because of this, future research on the interaction between current market trends, oil prices, etc., and the AI market is arguably pivotal. A well-founded examination of the potential pitfalls of this interaction would allow for preparation in the case of a downturn. 
 
 ## Expectation Indicators
-Due to the findings of Killian and Zhou, being that expectations are the driving factor behind oil price dynamics, future research can explore the specific indicators that herald changes in behavior. Web scraping allows for monitoring of consumer sentiment at a large scale, using sources such as social media and news media. While social media sources have not existed for long and thus will not have a wealth of historical data, their responsiveness can arguably allow for an agile account of consumer behavior and sentiment at a large scale. Exploration of this method's application might allow for specific indicators to be developed in regard to navigating market shocks.
+Due to the findings of Kilian and Zhou, being that expectations are the driving factor behind oil price dynamics, future research can explore the specific indicators that herald changes in behavior. Web scraping allows for monitoring of consumer sentiment at a large scale, using sources such as social media and news media. While social media sources have not existed for long and thus will not have a wealth of historical data, their responsiveness can arguably allow for an agile account of consumer behavior and sentiment at a large scale. Exploration of this method's application might allow for specific indicators to be developed in regard to navigating market shocks.
 
 ## Interactions and Foreign Countries.
 Importantly, these findings have been derived only from US markets. Therefore, future research using data from countries other than the US will allow for a closer monitoring of global oil-shock responses (and their domestic consequences). The interconnected nature of the modern economy means that such foreign data is valuable to domestic markets and therefore must be accounted for. Specifically, the dynamic responses of the US's largest trading partners (Mexico, Canada, and China) should be examined.
